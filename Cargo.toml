@@ -1,0 +1,38 @@
+[package]
+name = "nemax"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wry = "0.47"
+tao = "0.30"
+
+serde_json = "1.0"
+serde      = { version = "1", features = ["derive"] }
+webbrowser = "0.8"
+chrono = "0.4"
+colored = "2.0"
+rand = "0.8"
+image = "0.25"
+once_cell = "1.18"
+
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+muda = "0.17.1"
+base64 = "0.22.1"
+window-vibrancy = "0.7.1"
+window-shadows = "0.2.2"
+
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["winuser"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1 
+panic = "abort"
+strip = true
+
+[build-dependencies]
+winres = "0.1"

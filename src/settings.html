@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Настройки — neMAX</title>
+<style>
+  :root {
+    /* Чистая монохромная палитра */
+    --bg:       #ffffff;
+    --surface:  #ffffff;
+    --border:   #eaeaea;
+    --text:     #111111;
+    --subtext:  #666666;
+    --accent:   #111111;
+    --accent-h: #444444;
+    --danger:   #d93025;
+    --warn-bg:  #fafafa;
+    --radius:   6px;
+    --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { 
+    box-sizing: border-box; 
+    margin: 0; 
+    padding: 0; 
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 40px 32px;
+    max-width: 600px;
+    margin: 0 auto;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h2 {
+    font-size: 24px;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    margin-bottom: 36px;
+    color: var(--text);
+  }
+
+  .section {
+    background: transparent;
+    margin-bottom: 40px;
+  }
+
+  .section-title {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--subtext);
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+
+  .row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 0;
+  }
+
+  .row-info { 
+    flex: 1; 
+  }
+
+  .row-label {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .row-desc {
+    font-size: 13px;
+    color: var(--subtext);
+    line-height: 1.5;
+  }
+
+  /* Строгий Toggle switch */
+  .toggle {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .toggle input { opacity: 0; width: 0; height: 0; }
+
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    background: #e0e0e0;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background .25s ease;
+  }
+
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    width: 14px; 
+    height: 14px;
+    left: 3px; 
+    top: 3px;
+    background: #ffffff;
+    border-radius: 50%;
+    transition: transform .25s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  }
+
+  .toggle input:checked + .toggle-track {
+    background: var(--accent);
+  }
+
+  .toggle input:checked + .toggle-track::after {
+    transform: translateX(16px);
+  }
+
+  /* UA block */
+  .ua-value {
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: 12px;
+    color: var(--subtext);
+    background: #f7f7f7;
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-top: 8px;
+    word-break: break-all;
+    line-height: 1.5;
+  }
+
+  /* Минималистичный Warning banner */
+  .warn {
+    background: var(--warn-bg);
+    border-left: 2px solid var(--text);
+    padding: 12px 16px;
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--subtext);
+    line-height: 1.5;
+    display: none;
+  }
+
+  .warn.visible { 
+    display: block; 
+  }
+
+  /* Плоские кнопки */
+  .btn {
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all .2s ease;
+  }
+
+  .btn:active { 
+    transform: scale(0.98); 
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #ffffff;
+  }
+  .btn-primary:hover { 
+    background: var(--accent-h); 
+  }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn-secondary:hover { 
+    border-color: var(--text); 
+  }
+
+  .btn-danger {
+    background: transparent;
+    color: var(--danger);
+    border-color: #fce8e6;
+  }
+  .btn-danger:hover { 
+    background: #fce8e6; 
+  }
+
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+
+  /* Изящный Toast */
+  #toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: var(--text);
+    color: var(--bg);
+    border-radius: 24px;
+    padding: 10px 24px;
+    font-size: 13px;
+    font-weight: 500;
+    opacity: 0;
+    transition: all .3s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  #toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+</style>
+</head>
+<body>
+
+<h2>Настройки neMAX</h2>
+
+<!-- User-Agent -->
+<div class="section">
+  <div class="section-title">User-Agent</div>
+  <div class="ua-value" id="ua-display">Загрузка...</div>
+  <div class="warn visible" id="ua-warn">
+    После смены User-Agent необходим перезапуск приложения.
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-primary"   onclick="newUA()">Сгенерировать новый</button>
+    <button class="btn btn-secondary" onclick="copyUA()">Скопировать</button>
+  </div>
+</div>
+
+<!-- Фильтры -->
+<div class="section">
+  <div class="section-title">Фильтрация</div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-label">Service Workers</div>
+      <div class="row-desc">
+        По умолчанию отключены для защиты приватности.<br>
+        Включение может потребоваться для корректной работы сайта.
+      </div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="sw-toggle" onchange="onSWChange()">
+      <span class="toggle-track"></span>
+    </label>
+  </div>
+  <div class="warn" id="sw-warn">
+    Изменение вступит в силу после перезапуска приложения.
+  </div>
+</div>
+
+<!-- DevTools -->
+<div class="section">
+  <div class="section-title">Разработка</div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-label">DevTools</div>
+      <div class="row-desc">
+        Открыть инструменты разработчика WebView.<br>
+        В подавляющем большинстве случаев не требуется.
+      </div>
+    </div>
+    <button class="btn btn-danger" onclick="openDevTools()">Открыть</button>
+  </div>
+</div>
+
+<div class="footer">
+  <button class="btn btn-secondary" onclick="closeWindow()">Закрыть</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const send = (msg) => window.ipc && window.ipc.postMessage(msg);
+
+  let currentUA = '';
+
+  // Вызывается из Rust при открытии окна (через initialization_script)
+  window.__applySettings = function(s) {
+    currentUA = s.user_agent || '';
+    document.getElementById('ua-display').textContent = currentUA || '—';
+    document.getElementById('sw-toggle').checked = !!s.allow_service_workers;
+  };
+
+  // Вызывается из Rust после генерации нового UA (через evaluate_script)
+  window.__updateUA = function(ua) {
+    currentUA = ua;
+    document.getElementById('ua-display').textContent = ua;
+    toast('Новый UA сохранён. Перезапустите приложение.');
+  };
+
+  function newUA()      { send('settings:new_ua'); }
+  function closeWindow(){ send('settings:close'); }
+
+  function copyUA() {
+    if (!currentUA) return;
+    navigator.clipboard.writeText(currentUA).then(() => toast('Скопировано в буфер'));
+  }
+
+  function onSWChange() {
+    const val = document.getElementById('sw-toggle').checked;
+    document.getElementById('sw-warn').classList.add('visible');
+    send('settings:set_sw:' + val);
+  }
+
+  function openDevTools() {
+    const ok = confirm(
+      'Инструменты разработчика отображают весь трафик, куки и данные сессии.\n\n' +
+      'Не используйте их в публичных местах или по просьбе посторонних.\n\n' +
+      'Открыть DevTools?'
+    );
+    if (ok) send('settings:devtools');
+  }
+
+  function toast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2400);
+  }
+</script>
+</body>
+</html>
