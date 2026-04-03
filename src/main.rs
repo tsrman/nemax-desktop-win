@@ -220,7 +220,7 @@ fn main() {
     #[cfg(target_os = "linux")]
     {
         use tao::platform::unix::WindowExtUnix;
-        let _ = menu_bar.init_for_gtk_window(main_window.gtk_window(), None);
+        let _ = menu_bar.init_for_gtk_window(main_window.gtk_window(), None::<&muda::gtk::Container>);
     }
 
     // --- Главный WebView ---
