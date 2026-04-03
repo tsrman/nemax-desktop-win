@@ -23,6 +23,9 @@ base64 = "0.22.1"
 window-vibrancy = "0.7.1"
 window-shadows = "0.2.2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["winuser"] }
