@@ -93,6 +93,14 @@ fn init_directories() {
     }
 }
 
+// Для Linux меняем cwd на папку с бинарником (нужно для AppImage и запуска из произвольного места)
+#[cfg(target_os = "linux")]
+if let Ok(exe) = std::env::current_exe() {
+    if let Some(dir) = exe.parent() {
+        let _ = std::env::set_current_dir(dir);
+    }
+}
+
 fn load_icon(path: impl AsRef<Path>) -> Option<Icon> {
     let path = path.as_ref();
     info!("Loading icon: {}", path.display());

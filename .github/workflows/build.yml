@@ -1,5 +1,4 @@
 name: Build and Release
-
 on:
   workflow_dispatch:
     inputs:
@@ -7,72 +6,132 @@ on:
         description: 'Тег версии для релиза (например, v0.1.0)'
         required: true
         default: 'v0.1.0'
-
 permissions:
   contents: write
-
 jobs:
-  build-and-release:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            artifact_name: nemax-windows.zip
-            binary_name: nemax.exe
-          - os: ubuntu-latest
-            artifact_name: nemax-linux.tar.gz
-            binary_name: nemax
-
+  build-windows:
+    name: Build on Windows
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
-
-    - name: Install Linux dependencies
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
-
-    - name: Cache cargo registry
+    - name: Cache cargo
       uses: actions/cache@v3
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
+        key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - name: Build project
+      run: cargo build --release
+    - name: Package files
+      shell: bash
+      run: |
+        mkdir release_pkg
+        cp target/release/nemax.exe release_pkg/
+        cp -r assets data storage release_pkg/
+        7z a nemax-windows.zip ./release_pkg/*
+    - name: Publish Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.version }}
+        files: nemax-windows.zip
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+
+  build-linux:
+    name: Build Linux + AppImage
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libwebkit2gtk-4.1-dev build-essential curl wget file \
+          libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+          libgtk-3-dev libglib2.0-dev libgdk-pixbuf2.0-dev \
+          libpango1.0-dev libatk1.0-dev libcairo2-dev \
+          fuse libfuse2
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Build project
       run: cargo build --release
 
-    - name: Package files (Linux)
-      if: runner.os == 'Linux'
+    # --- Обычный tar.gz ---
+    - name: Package tar.gz
       run: |
         mkdir release_pkg
-        cp target/release/${{ matrix.binary_name }} release_pkg/
+        cp target/release/nemax release_pkg/
         cp -r assets data storage release_pkg/
-        tar -czvf ${{ matrix.artifact_name }} -C release_pkg .
+        tar -czvf nemax-linux.tar.gz -C release_pkg .
 
-    - name: Package files (Windows)
-      if: runner.os == 'Windows'
-      shell: bash
+    # --- AppImage ---
+    - name: Download linuxdeploy
       run: |
-        mkdir release_pkg
-        cp target/release/${{ matrix.binary_name }} release_pkg/
-        cp -r assets data storage release_pkg/
-        7z a ${{ matrix.artifact_name }} ./release_pkg/*
+        wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+        chmod +x linuxdeploy-x86_64.AppImage
+
+    - name: Prepare AppDir
+      run: |
+        mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/share/applications
+        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+        # Бинарник
+        cp target/release/nemax AppDir/usr/bin/nemax
+
+        # Ресурсы — кладём рядом с бинарником чтобы относительные пути работали
+        cp -r assets AppDir/usr/bin/assets
+        cp -r data   AppDir/usr/bin/data
+        mkdir -p AppDir/usr/bin/storage
+
+        # Иконка
+        cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/nemax.png
+
+        # .desktop файл
+        cat > AppDir/usr/share/applications/nemax.desktop << 'EOF'
+        [Desktop Entry]
+        Name=neMAX
+        Exec=nemax
+        Icon=nemax
+        Type=Application
+        Categories=Network;InstantMessaging;
+        Comment=Лёгкий клиент для max.ru
+        EOF
+
+    - name: Build AppImage
+      env:
+        ARCH: x86_64
+      run: |
+        ./linuxdeploy-x86_64.AppImage \
+          --appdir AppDir \
+          --output appimage
+        # linuxdeploy называет файл по имени из .desktop + архитектура
+        mv neMAX-x86_64.AppImage nemax-x86_64.AppImage
 
     - name: Publish Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ github.event.inputs.version }}
-        files: ${{ matrix.artifact_name }}
+        files: |
+          nemax-linux.tar.gz
+          nemax-x86_64.AppImage
         draft: false
         prerelease: false
         generate_release_notes: true
