@@ -21,18 +21,18 @@ jobs:
           - os: windows-latest
             artifact_name: nemax-windows.zip
             binary_name: nemax.exe
-          - os: ubuntu-latest
-            artifact_name: nemax-linux.tar.gz
-            binary_name: nemax
+          # - os: ubuntu-latest
+          #   artifact_name: nemax-linux.tar.gz
+          #   binary_name: nemax
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Linux dependencies
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+    # - name: Install Linux dependencies
+    #   if: runner.os == 'Linux'
+    #   run: |
+    #     sudo apt-get update
+    #     sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
@@ -51,13 +51,13 @@ jobs:
     - name: Build project
       run: cargo build --release
 
-    - name: Package files (Linux)
-      if: runner.os == 'Linux'
-      run: |
-        mkdir release_pkg
-        cp target/release/${{ matrix.binary_name }} release_pkg/
-        cp -r assets data storage release_pkg/
-        tar -czvf ${{ matrix.artifact_name }} -C release_pkg .
+    # - name: Package files (Linux)
+    #   if: runner.os == 'Linux'
+    #   run: |
+    #     mkdir release_pkg
+    #     cp target/release/${{ matrix.binary_name }} release_pkg/
+    #     cp -r assets data storage release_pkg/
+    #     tar -czvf ${{ matrix.artifact_name }} -C release_pkg .
 
     - name: Package files (Windows)
       if: runner.os == 'Windows'
