@@ -28,7 +28,7 @@ const MAC_PLATFORMS: &[&str] = &[
     "Macintosh; Intel Mac OS X 14_0",
 ];
 
-/// Генерирует случайный Chrome User-Agent из частей.
+/// Генерация Chrome User-Agent.
 pub fn generate_user_agent() -> String {
     let mut rng = rand::thread_rng();
 

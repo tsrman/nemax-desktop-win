@@ -23,7 +23,7 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Загружает настройки из файла. Если файл отсутствует или повреждён — создаёт дефолтные.
+    /// Загрузка настроек. При ошибке используются значения по умолчанию.
     pub fn load() -> Self {
         let path = Path::new(FILE_SETTINGS);
 
@@ -34,9 +34,9 @@ impl Settings {
                         info!("Settings loaded from '{}'", FILE_SETTINGS);
                         return s;
                     }
-                    Err(e) => warn!("Settings parse error: {} — using defaults", e),
+                    Err(e) => warn!("Settings parse error: {}, using defaults", e),
                 },
-                Err(e) => error!("Cannot read settings: {} — using defaults", e),
+                Err(e) => error!("Cannot read settings: {}, using defaults", e),
             }
         } else {
             info!("No settings file found, creating defaults");
@@ -47,7 +47,7 @@ impl Settings {
         s
     }
 
-    /// Сохраняет настройки на диск.
+    /// Сохранение на диск.
     pub fn save(&self) {
         match serde_json::to_string_pretty(self) {
             Ok(json) => {
@@ -61,7 +61,7 @@ impl Settings {
         }
     }
 
-    /// Генерирует и сохраняет новый UA. Возвращает новое значение.
+    /// Обновление User-Agent.
     pub fn randomize_ua(&mut self) -> String {
         let ua = generate_user_agent();
         self.user_agent = ua.clone();
@@ -69,7 +69,7 @@ impl Settings {
         ua
     }
 
-    /// Устанавливает флаг Service Workers и сохраняет.
+    /// Установка Service Workers.
     pub fn set_service_workers(&mut self, enabled: bool) {
         self.allow_service_workers = enabled;
         self.save();

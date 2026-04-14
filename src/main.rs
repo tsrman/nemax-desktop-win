@@ -29,7 +29,7 @@ use gtk;
 
 const APP_TITLE:    &str = "neMAX";
 const APP_ENDPOINT: &str = "https://web.max.ru";
-const DONATE_URL:   &str = "https://pay.cloudtips.ru/p/fe3fd493"; 
+const DONATE_URL:   &str = "https://pay.cloudtips.ru/p/fe3fd493";
 
 const DIR_ASSETS:  &str = "assets";
 const DIR_DATA:    &str = "data";
@@ -39,23 +39,17 @@ const FILE_ICON:      &str = "assets/icon.png";
 const FILE_BLOCKLIST: &str = "data/blocklist.txt";
 
 const DEFAULT_BLOCKLIST: &[&str] = &[
-    "analytics", "yandex", "google-analytics", "facebook", "ads", "gtag",
-    "track", "mixpanel", "apptracer", "perf/upload", "crashtoken", "sdkversion",
-    "amplitude", "hotjar", "doubleclick", "googletagmanager", "segment",
-    "matomo", "adsystem", "sdk-api", "perf/", "crash",
+    "analytics", "apptracer", "perf/", "sdk-api", "adsystem",
+    "crashtoken", "crash", "track",
 ];
 
 const FILTER_SCRIPT_TEMPLATE: &str = include_str!("filter.js");
 const SETTINGS_HTML:          &str = include_str!("settings.html");
 
-// ID пунктов меню для muda
+// muda menu IDs
 const MENU_SETTINGS: &str = "menu_settings";
 const MENU_DONATE:   &str = "menu_donate";
 const MENU_ABOUT:    &str = "menu_about";
-
-// ---------------------------------------------------------------------------
-// Команды IPC от окна настроек
-// ---------------------------------------------------------------------------
 
 enum SettingsCmd {
     NewUA,
@@ -79,9 +73,7 @@ impl SettingsCmd {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Утилиты
-// ---------------------------------------------------------------------------
+// Helpers
 
 fn init_directories() {
     for dir in[DIR_ASSETS, DIR_DATA, DIR_STORAGE] {
@@ -135,7 +127,7 @@ use base64::{Engine as _, engine::general_purpose}; // Добавьте в на�
 fn build_filter_script(blocklist: &[String], allow_sw: bool) -> String {
     let sigs_json = serde_json::to_string(blocklist).unwrap_or_else(|_| "[]".to_string());
     
-    // Вспомогательная функция для чтения в Base64
+    // Base64 loader
     let load_sound = |path: &str| -> String {
         if let Ok(bytes) = std::fs::read(path) {
             general_purpose::STANDARD.encode(bytes)
@@ -177,11 +169,10 @@ fn main() {
         (s.user_agent.clone(), s.allow_service_workers)
     };
 
-    // Создаем EventLoop с поддержкой кастомных событий (чтобы сообщения от веб-страниц мгновенно будили программу)
+    // EventLoop initialization
     let event_loop = EventLoopBuilder::<String>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    // --- Меню "Файл" через muda ---
     let menu_bar = Menu::new();
     let file_menu = Submenu::new("Меню", true);
 
@@ -196,7 +187,6 @@ fn main() {
 
     let _ = menu_bar.append(&file_menu);
 
-    // --- Главное окно ---
     let mut window_builder = WindowBuilder::new()
         .with_title(APP_TITLE)
         .with_visible(false)
@@ -226,7 +216,7 @@ fn main() {
         let _ = menu_bar.init_for_gtk_window(main_window.gtk_window(), None::<&gtk::Container>);
     }
 
-    // --- Главный WebView ---
+    // WebView setup
     let blocklist     = load_blocklist(FILE_BLOCKLIST);
     let filter_script = build_filter_script(&blocklist, allow_sw);
 
@@ -249,7 +239,7 @@ fn main() {
                 if let Ok(content) = std::fs::read(asset_path) {
                     return wry::http::Response::builder()
                         .header("Content-Type", "audio/mpeg")
-                        .header("Access-Control-Allow-Origin", "*") // Разрешаем CORS
+                        .header("Access-Control-Allow-Origin", "*") // CORS
                         .body(content.into())
                         .unwrap();
                 }
@@ -274,7 +264,6 @@ fn main() {
     event_loop.run(move |event, event_loop_target, control_flow| {
         *control_flow = ControlFlow::Wait;
 
-        // --- Разбираем события от меню muda ---
         while let Ok(menu_event) = menu_channel.try_recv() {
             if menu_event.id == MENU_SETTINGS {
                 if settings_win.is_none() {
@@ -283,7 +272,6 @@ fn main() {
                         .unwrap_or_else(|_| "{}".to_string());
                     drop(s);
 
-                    // Улучшенный скрипт инициализации: точно сработает
                     let init_script = format!(
                         r#"
                         window.__SETTINGS_JSON__ = {};
@@ -294,14 +282,13 @@ fn main() {
                             }}
                         }}, 50);
 
-                        // Подстраховка: перестаем пытаться через 3 секунды, чтобы не крутить цикл вечно
                         setTimeout(function() {{ clearInterval(__settingsInterval); }}, 3000);
                         "#,
                         settings_json
                     );
 
                     let win = WindowBuilder::new()
-                        .with_title("Настройки — neMAX")
+                        .with_title("Настройки - neMAX")
                         .with_inner_size(LogicalSize::new(520.0_f64, 500.0_f64))
                         .with_resizable(false)
                         .build(event_loop_target)
@@ -318,15 +305,13 @@ fn main() {
                         .expect("Settings WebView failed");
 
                     settings_win = Some((win, wv));
-                    info!("Settings window opened");
-                } else if let Some((ref win, _)) = settings_win {
+                } else if let Some((win, _)) = &settings_win {
                     win.set_focus();
                 }
             } else if menu_event.id == MENU_DONATE {
-                // Донат теперь открывается в отдельном окне приложения
                 if donate_win.is_none() {
                     let win = WindowBuilder::new()
-                        .with_title("Донат ♥ — neMAX")
+                        .with_title("Донат ♥ - neMAX")
                         .with_inner_size(LogicalSize::new(800.0_f64, 600.0_f64))
                         .with_resizable(true)
                         .build(event_loop_target)
@@ -344,17 +329,16 @@ fn main() {
                 }
             } else if menu_event.id == MENU_ABOUT {
                 let script = format!(
-                    "alert('neMAX v{}\\n\\nЛёгкий и безопасный клиент для max.ru\\n\\nДанное ПО является независимой разработкой и не связано с ООО «ВК» (ИНН 7743001840), ООО «Коммуникационная платформа» (ИНН 9714058267), ООО «МАХ» (ИНН 9714058267), ООО «Мэйл.ру Цифровые Технологии» (ИНН 7714415613) и структурами VK (Mail.ru Group).\\n\\nДанные передаются на сервер в исходном виде. Разработчик не дополняет и не модифицирует запросы (за исключением блокировки исходящей аналитики/статистики).\\n\\nУсловия использования (EULA):\\n- tos.nemax-mod.ru\\n- https://telegra.ph/LICENZIONNOE-SOGLASHENIE-KONECHNOGO-POLZOVATELYA-EULA-12-10\\n\\n© 2026 neMAX');",
+                    "alert('neMAX v{}\\n\\nLightweight max.ru client\\n\\nSoftware is independent development not associated with VK, Mail.ru or MAX LLC structures.\\n\\nData transmitted as is. Developer does not modify requests (except blocking analytics).\\n\\nEULA:\\n- tos.nemax-mod.ru\\n- https://telegra.ph/LICENZIONNOE-SOGLASHENIE-KONECHNOGO-POLZOVATELYA-EULA-12-10\\n\\n© 2026 neMAX');",
                     env!("CARGO_PKG_VERSION")
                 );
                 if let Err(e) = main_webview.evaluate_script(&script) {
-                    error!("About dialog failed: {}", e);
+                    error!("[About Alert] Error: {}", e);
                 }
             }
         }
 
         match event {
-            // --- Обработка пользовательских сообщений (мгновенная реакция) ---
             Event::UserEvent(msg) => {
                 if msg.starts_with("settings:") {
                     info!("[Settings IPC] {}", msg);

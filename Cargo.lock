@@ -1854,6 +1854,7 @@ dependencies = [
  "base64",
  "chrono",
  "colored",
+ "gtk",
  "image",
  "muda",
  "once_cell",
