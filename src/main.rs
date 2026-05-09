@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod autostart;
 mod settings;
+mod single_instance;
+mod tray;
 mod ua_gen;
 
 use std::fs::{self, File};
@@ -8,6 +11,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use muda::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use serde::Deserialize;
 use tao::{
     dpi::LogicalSize,
     event::{Event, StartCause, WindowEvent},
@@ -19,6 +23,7 @@ use tracing_subscriber::EnvFilter;
 use wry::WebViewBuilder;
 
 use settings::Settings;
+use tray::TrayState;
 
 #[cfg(target_os = "linux")]
 use gtk;
@@ -54,6 +59,12 @@ const MENU_ABOUT:    &str = "menu_about";
 enum SettingsCmd {
     NewUA,
     SetSW(bool),
+    SetTray {
+        minimize_to_tray: bool,
+        close_to_tray: bool,
+        start_minimized: bool,
+        auto_start: bool,
+    },
     OpenDevTools,
     Close,
 }
@@ -68,17 +79,45 @@ impl SettingsCmd {
                 let val = s.trim_start_matches("settings:set_sw:") == "true";
                 Some(Self::SetSW(val))
             }
+            s if s.starts_with("settings:set_tray:") => {
+                let json = s.trim_start_matches("settings:set_tray:");
+                #[derive(Deserialize)]
+                struct TrayPayload {
+                    minimize_to_tray: bool,
+                    close_to_tray: bool,
+                    start_minimized: bool,
+                    auto_start: bool,
+                }
+                serde_json::from_str::<TrayPayload>(json).ok().map(|v| Self::SetTray {
+                    minimize_to_tray: v.minimize_to_tray,
+                    close_to_tray: v.close_to_tray,
+                    start_minimized: v.start_minimized,
+                    auto_start: v.auto_start,
+                })
+            }
             _ => None,
         }
     }
 }
 
+// ---------------------------------------------------------------------------
 // Helpers
 
+/// Возвращает папку, в которой лежит исполняемый файл.
+pub fn exe_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+// ---------------------------------------------------------------------------
+
 fn init_directories() {
-    for dir in[DIR_ASSETS, DIR_DATA, DIR_STORAGE] {
-        if !Path::new(dir).exists() {
-            if let Err(e) = fs::create_dir_all(dir) {
+    let base = exe_dir();
+    for dir in &[DIR_ASSETS, DIR_DATA, DIR_STORAGE] {
+        let full = base.join(dir);
+        if !full.exists() {
+            if let Err(e) = fs::create_dir_all(&full) {
                 error!("Cannot create directory '{}': {}", dir, e);
             }
         }
@@ -122,12 +161,11 @@ fn load_blocklist(path: impl AsRef<Path>) -> Vec<String> {
     DEFAULT_BLOCKLIST.iter().map(|s| s.to_string()).collect()
 }
 
-use base64::{Engine as _, engine::general_purpose}; // Добавьте в начало файла
+use base64::{Engine as _, engine::general_purpose};
 
 fn build_filter_script(blocklist: &[String], allow_sw: bool) -> String {
     let sigs_json = serde_json::to_string(blocklist).unwrap_or_else(|_| "[]".to_string());
-    
-    // Base64 loader
+
     let load_sound = |path: &str| -> String {
         if let Ok(bytes) = std::fs::read(path) {
             general_purpose::STANDARD.encode(bytes)
@@ -136,9 +174,9 @@ fn build_filter_script(blocklist: &[String], allow_sw: bool) -> String {
         }
     };
 
-    let notif_b64 = load_sound("assets/notification.mp3");
-    let ring_b64  = load_sound("assets/ringtone.mp3");
-    let recon_b64 = load_sound("assets/reconnect.mp3");
+    let notif_b64 = load_sound(&exe_dir().join("assets/notification.mp3").to_string_lossy());
+    let ring_b64  = load_sound(&exe_dir().join("assets/ringtone.mp3").to_string_lossy());
+    let recon_b64 = load_sound(&exe_dir().join("assets/reconnect.mp3").to_string_lossy());
 
     FILTER_SCRIPT_TEMPLATE
         .replace("__SIGNATURES__", &sigs_json)
@@ -146,6 +184,16 @@ fn build_filter_script(blocklist: &[String], allow_sw: bool) -> String {
         .replace("__NOTIF_B64__", &notif_b64)
         .replace("__RING_B64__", &ring_b64)
         .replace("__RECON_B64__", &recon_b64)
+}
+
+/// Синхронизирует состояние автозапуска в реестре с настройками.
+fn sync_auto_start(settings: &Arc<Mutex<Settings>>) {
+    let auto_start = settings.lock().unwrap().auto_start;
+    if let Err(e) = autostart::set_auto_start(auto_start) {
+        error!("Failed to sync auto-start: {}", e);
+    } else {
+        info!("Auto-start synced: {}", auto_start);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -162,16 +210,38 @@ fn main() {
     init_directories();
     info!("Application starting");
 
+    // ── Аргументы командной строки ──────────────────────────────────────
+    let cli_minimized = std::env::args().any(|a| a == "--minimized");
+
+    // ── Настройки ───────────────────────────────────────────────────────
     let settings = Arc::new(Mutex::new(Settings::load()));
 
-    let (user_agent, allow_sw) = {
+    let (user_agent, allow_sw, _minimize_to_tray, _close_to_tray, start_minimized) = {
         let s = settings.lock().unwrap();
-        (s.user_agent.clone(), s.allow_service_workers)
+        (
+            s.user_agent.clone(),
+            s.allow_service_workers,
+            s.minimize_to_tray,
+            s.close_to_tray,
+            s.start_minimized,
+        )
     };
 
-    // EventLoop initialization
+    // Итоговый флаг: сворачиваем если явно указано или в настройках
+    let effective_start_minimized = cli_minimized || start_minimized;
+
+    // Синхронизируем автостарт с реестром
+    sync_auto_start(&settings);
+
+    // ── EventLoop ───────────────────────────────────────────────────────
     let event_loop = EventLoopBuilder::<String>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+
+    // ── Проверка единственного экземпляра ────────────────────────────────
+    if !single_instance::ensure_single_instance() {
+        info!("Another instance is already running, exiting");
+        return;
+    }
 
     let menu_bar = Menu::new();
     let file_menu = Submenu::new("Меню", true);
@@ -187,13 +257,14 @@ fn main() {
 
     let _ = menu_bar.append(&file_menu);
 
+    // ── Главное окно ────────────────────────────────────────────────────
     let mut window_builder = WindowBuilder::new()
         .with_title(APP_TITLE)
         .with_visible(false)
         .with_inner_size(LogicalSize::new(1200.0_f64, 800.0_f64))
         .with_resizable(true);
 
-    if let Some(icon) = load_icon(FILE_ICON) {
+    if let Some(icon) = load_icon(exe_dir().join(FILE_ICON)) {
         window_builder = window_builder.with_window_icon(Some(icon));
     }
 
@@ -216,8 +287,17 @@ fn main() {
         let _ = menu_bar.init_for_gtk_window(main_window.gtk_window(), None::<&gtk::Container>);
     }
 
-    // WebView setup
-    let blocklist     = load_blocklist(FILE_BLOCKLIST);
+    // ── Иконка в трее ───────────────────────────────────────────────────
+    let tray_state = {
+        let img = image::open(exe_dir().join(FILE_ICON)).expect("Cannot load icon for tray");
+        let (w, h) = (img.width(), img.height());
+        let rgba = img.into_rgba8().into_raw();
+        TrayState::new(rgba, w, h, !effective_start_minimized, proxy.clone())
+    };
+    info!("Tray icon created");
+
+    // ── WebView ─────────────────────────────────────────────────────────
+    let blocklist     = load_blocklist(exe_dir().join(FILE_BLOCKLIST));
     let filter_script = build_filter_script(&blocklist, allow_sw);
 
     let main_proxy = proxy.clone();
@@ -228,18 +308,16 @@ fn main() {
         .with_ipc_handler(move |request: wry::http::Request<String>| {
             let _ = main_proxy.send_event(request.body().clone());
         })
-
         .with_custom_protocol("nemax".into(), move |_id, request| {
             let path = request.uri().path();
-            // Если запрашивается файл из папки assets
             if path.starts_with("/assets/") {
-                let file_name = &path[8..]; // обрезаем "/assets/"
-                let asset_path = std::path::Path::new("assets").join(file_name);
-                
+                let file_name = &path[8..];
+                let asset_path = exe_dir().join("assets").join(file_name);
+
                 if let Ok(content) = std::fs::read(asset_path) {
                     return wry::http::Response::builder()
                         .header("Content-Type", "audio/mpeg")
-                        .header("Access-Control-Allow-Origin", "*") // CORS
+                        .header("Access-Control-Allow-Origin", "*")
                         .body(content.into())
                         .unwrap();
                 }
@@ -252,18 +330,23 @@ fn main() {
         main_wv_builder = main_wv_builder.with_devtools(true);
     }
 
-    let main_webview = main_wv_builder.with_background_color((18, 18, 18, 255)).build(&main_window).expect("WebView creation failed");
+    let main_webview = main_wv_builder
+        .with_background_color((18, 18, 18, 255))
+        .build(&main_window)
+        .expect("WebView creation failed");
 
     info!("Initialization complete");
 
     let mut settings_win: Option<(tao::window::Window, wry::WebView)> = None;
     let mut donate_win:   Option<(tao::window::Window, wry::WebView)> = None;
-    
+
     let menu_channel = muda::MenuEvent::receiver();
 
+    // ── Event Loop ──────────────────────────────────────────────────────
     event_loop.run(move |event, event_loop_target, control_flow| {
         *control_flow = ControlFlow::Wait;
 
+        // ── Главное меню ────────────────────────────────────────────
         while let Ok(menu_event) = menu_channel.try_recv() {
             if menu_event.id == MENU_SETTINGS {
                 if settings_win.is_none() {
@@ -329,7 +412,7 @@ fn main() {
                 }
             } else if menu_event.id == MENU_ABOUT {
                 let script = format!(
-                    "alert('neMAX v{}\\n\\nLightweight max.ru client\\n\\nSoftware is independent development not associated with VK, Mail.ru or MAX LLC structures.\\n\\nData transmitted as is. Developer does not modify requests (except blocking analytics).\\n\\nEULA:\\n- tos.nemax-mod.ru\\n- https://telegra.ph/LICENZIONNOE-SOGLASHENIE-KONECHNOGO-POLZOVATELYA-EULA-12-10\\n\\n© 2026 neMAX');",
+                    "alert('neMAX v{}\\\n\\\nLightweight max.ru client\\n\\\nSoftware is independent development not associated with VK, Mail.ru or MAX LLC structures.\\n\\\nData transmitted as is. Developer does not modify requests (except blocking analytics).\\n\\\nEULA:\\n- tos.nemax-mod.ru\\n- https://telegra.ph/LICENZIONNOE-SOGLASHENIE-KONECHNOGO-POLZOVATELYA-EULA-12-10\\n\\\n© 2026 neMAX');",
                     env!("CARGO_PKG_VERSION")
                 );
                 if let Err(e) = main_webview.evaluate_script(&script) {
@@ -338,9 +421,49 @@ fn main() {
             }
         }
 
+        // ── Меню трея ───────────────────────────────────────────────
+        while let Ok(menu_event) = tray_state.menu_events.try_recv() {
+            match menu_event.id.as_ref() {
+                tray::TRAY_ID_SHOW_HIDE => {
+                    let visible = main_window.is_visible();
+                    if visible {
+                        main_window.set_visible(false);
+                        tray_state.show_hide_item.set_text("Показать");
+                        info!("Window hidden to tray");
+                    } else {
+                        main_window.set_maximized(true);
+                        main_window.set_visible(true);
+                        main_window.set_focus();
+                        tray_state.show_hide_item.set_text("Скрыть");
+                        info!("Window restored from tray");
+                    }
+                }
+                tray::TRAY_ID_EXIT => {
+                    info!("Exit requested from tray menu");
+                    *control_flow = ControlFlow::Exit;
+                }
+                _ => {}
+            }
+        }
+
+        // ── Клики по иконке трея обрабатываются через set_event_handler
+        //     (сообщение \"tray:toggle\" приходит в UserEvent ниже)
+
+        // ── Основные события ────────────────────────────────────────
         match event {
             Event::UserEvent(msg) => {
-                if msg.starts_with("settings:") {
+                if msg == "tray:toggle" {
+                    let visible = main_window.is_visible();
+                    if visible {
+                        main_window.set_visible(false);
+                        tray_state.show_hide_item.set_text("Показать");
+                    } else {
+                        main_window.set_maximized(true);
+                        main_window.set_visible(true);
+                        main_window.set_focus();
+                        tray_state.show_hide_item.set_text("Скрыть");
+                    }
+                } else if msg.starts_with("settings:") {
                     info!("[Settings IPC] {}", msg);
                     match SettingsCmd::parse(&msg) {
                         Some(SettingsCmd::NewUA) => {
@@ -357,10 +480,20 @@ fn main() {
                         Some(SettingsCmd::SetSW(val)) => {
                             settings.lock().unwrap().set_service_workers(val);
                         }
+                        Some(SettingsCmd::SetTray { minimize_to_tray, close_to_tray, start_minimized, auto_start }) => {
+                            let mut s = settings.lock().unwrap();
+                            s.minimize_to_tray = minimize_to_tray;
+                            s.close_to_tray = close_to_tray;
+                            s.start_minimized = start_minimized;
+                            s.set_auto_start(auto_start);
+                            drop(s);
+                            sync_auto_start(&settings);
+                            info!("Tray settings updated");
+                        }
                         Some(SettingsCmd::OpenDevTools) => {
                             #[cfg(debug_assertions)]
                             main_webview.open_devtools();
-                            
+
                             #[cfg(not(debug_assertions))]
                             if let Some((_, ref wv)) = settings_win {
                                 let _ = wv.evaluate_script(
@@ -369,14 +502,22 @@ fn main() {
                             }
                         }
                         Some(SettingsCmd::Close) => {
+                            // При закрытии настроек синхронизируем автостарт
+                            sync_auto_start(&settings);
                             settings_win = None;
                         }
                         None => {}
                     }
                 } else if msg == "filter:ready" {
-                    main_window.set_visible(true);
-                    main_window.set_focus(); // Сразу даем фокус
-                    info!("Window shown after content ready");
+                    if effective_start_minimized {
+                        info!("Started minimized — window stays hidden in tray");
+                        // Окно остаётся скрытым, только трей
+                    } else {
+                        main_window.set_maximized(true);
+                        main_window.set_visible(true);
+                        main_window.set_focus();
+                        info!("Window shown after content ready");
+                    }
                 } else if msg.starts_with("filter:") {
                     let log_msg = &msg[7..];
                     if log_msg.contains("blocked") {
@@ -391,12 +532,21 @@ fn main() {
                 info!("Window ready");
             }
 
+            // ── Кнопка «Закрыть» → трей (или выход) ────────────────
             Event::WindowEvent { event: WindowEvent::CloseRequested, window_id, .. } => {
                 if window_id == main_window_id {
-                    info!("Main window closed, exiting");
-                    *control_flow = ControlFlow::Exit;
+                    let close_to_tray = settings.lock().unwrap().close_to_tray;
+                    if close_to_tray {
+                        info!("Close requested — hiding to tray");
+                        main_window.set_visible(false);
+                        tray_state.show_hide_item.set_text("Показать");
+                    } else {
+                        info!("Main window closed, exiting");
+                        *control_flow = ControlFlow::Exit;
+                    }
                 } else if let Some((ref win, _)) = settings_win {
                     if win.id() == window_id {
+                        sync_auto_start(&settings);
                         settings_win = None;
                         info!("Settings window closed");
                     }

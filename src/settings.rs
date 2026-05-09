@@ -1,16 +1,26 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
 use tracing::{error, info, warn};
 
 use crate::ua_gen::generate_user_agent;
+use crate::exe_dir;
 
-const FILE_SETTINGS: &str = "storage/settings.json";
+const FILE_SETTINGS_REL: &str = "storage/settings.json";
+
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub user_agent: String,
     pub allow_service_workers: bool,
+    #[serde(default = "default_true")]
+    pub minimize_to_tray: bool,
+    #[serde(default = "default_true")]
+    pub close_to_tray: bool,
+    #[serde(default)]
+    pub start_minimized: bool,
+    #[serde(default)]
+    pub auto_start: bool,
 }
 
 impl Default for Settings {
@@ -18,6 +28,10 @@ impl Default for Settings {
         Self {
             user_agent: generate_user_agent(),
             allow_service_workers: false,
+            minimize_to_tray: true,
+            close_to_tray: true,
+            start_minimized: false,
+            auto_start: false,
         }
     }
 }
@@ -25,13 +39,13 @@ impl Default for Settings {
 impl Settings {
     /// Загрузка настроек. При ошибке используются значения по умолчанию.
     pub fn load() -> Self {
-        let path = Path::new(FILE_SETTINGS);
+        let path = exe_dir().join(FILE_SETTINGS_REL);
 
         if path.exists() {
-            match fs::read_to_string(path) {
+            match fs::read_to_string(&path) {
                 Ok(content) => match serde_json::from_str::<Settings>(&content) {
                     Ok(s) => {
-                        info!("Settings loaded from '{}'", FILE_SETTINGS);
+                        info!("Settings loaded from '{}'", path.display());
                         return s;
                     }
                     Err(e) => warn!("Settings parse error: {}, using defaults", e),
@@ -51,10 +65,10 @@ impl Settings {
     pub fn save(&self) {
         match serde_json::to_string_pretty(self) {
             Ok(json) => {
-                if let Err(e) = fs::write(FILE_SETTINGS, json) {
+                if let Err(e) = fs::write(&exe_dir().join(FILE_SETTINGS_REL), json) {
                     error!("Failed to save settings: {}", e);
                 } else {
-                    info!("Settings saved to '{}'", FILE_SETTINGS);
+                    info!("Settings saved to '{}'", exe_dir().join(FILE_SETTINGS_REL).display());
                 }
             }
             Err(e) => error!("Settings serialization failed: {}", e),
@@ -72,6 +86,24 @@ impl Settings {
     /// Установка Service Workers.
     pub fn set_service_workers(&mut self, enabled: bool) {
         self.allow_service_workers = enabled;
+        self.save();
+    }
+
+    /// Установка сворачивания в трей.
+    pub fn set_minimize_to_tray(&mut self, val: bool) {
+        self.minimize_to_tray = val;
+        self.save();
+    }
+
+    /// Установка закрытия в трей.
+    pub fn set_close_to_tray(&mut self, val: bool) {
+        self.close_to_tray = val;
+        self.save();
+    }
+
+    /// Установка автозапуска.
+    pub fn set_auto_start(&mut self, val: bool) {
+        self.auto_start = val;
         self.save();
     }
 }
