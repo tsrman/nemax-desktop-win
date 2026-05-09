@@ -1,6 +1,9 @@
 name: Build and Release
 
 on:
+  push:
+    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       version:
@@ -12,67 +15,65 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            artifact_name: nemax-windows.zip
-            binary_name: nemax.exe
-          # - os: ubuntu-latest
-          #   artifact_name: nemax-linux.tar.gz
-          #   binary_name: nemax
-
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
-
-    # - name: Install Linux dependencies
-    #   if: runner.os == 'Linux'
-    #   run: |
-    #     sudo apt-get update
-    #     sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Cache cargo registry
-      uses: actions/cache@v3
+    - name: Cache cargo
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
+        key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: windows-cargo-
 
-    - name: Build project
+    - name: Build release
       run: cargo build --release
 
-    # - name: Package files (Linux)
-    #   if: runner.os == 'Linux'
-    #   run: |
-    #     mkdir release_pkg
-    #     cp target/release/${{ matrix.binary_name }} release_pkg/
-    #     cp -r assets data storage release_pkg/
-    #     tar -czvf ${{ matrix.artifact_name }} -C release_pkg .
+    - name: Copy WebView2Loader.dll
+      shell: bash
+      run: |
+        DLL=$(find target/release/build/webview2-com-sys-*/out/x64 -name WebView2Loader.dll -type f | head -1)
+        cp "$DLL" target/release/
 
-    - name: Package files (Windows)
-      if: runner.os == 'Windows'
+    - name: Package
       shell: bash
       run: |
         mkdir release_pkg
-        cp target/release/${{ matrix.binary_name }} release_pkg/
+        cp target/release/nemax.exe release_pkg/
+        cp target/release/WebView2Loader.dll release_pkg/ 2>/dev/null || true
         cp -r assets data storage release_pkg/
-        7z a ${{ matrix.artifact_name }} ./release_pkg/*
+        7z a nemax-windows.zip ./release_pkg/*
 
-    - name: Publish Release
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nemax-windows
+        path: nemax-windows.zip
+
+    - name: Publish Release (tags only)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        files: nemax-windows.zip
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+
+    - name: Publish Release (manual dispatch)
+      if: github.event_name == 'workflow_dispatch'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ github.event.inputs.version }}
-        files: ${{ matrix.artifact_name }}
+        files: nemax-windows.zip
         draft: false
         prerelease: false
         generate_release_notes: true
