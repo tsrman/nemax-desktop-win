@@ -9,6 +9,7 @@ pub const TRAY_ID_EXIT: &str = "tray_exit";
 
 /// Состояние иконки в системном трее.
 pub struct TrayState {
+    #[allow(dead_code)]
     pub tray: TrayIcon,
     pub show_hide_item: MenuItem,
     pub menu_events: MenuEventReceiver,

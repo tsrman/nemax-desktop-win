@@ -14,8 +14,6 @@ pub struct Settings {
     pub user_agent: String,
     pub allow_service_workers: bool,
     #[serde(default = "default_true")]
-    pub minimize_to_tray: bool,
-    #[serde(default = "default_true")]
     pub close_to_tray: bool,
     #[serde(default)]
     pub start_minimized: bool,
@@ -28,7 +26,6 @@ impl Default for Settings {
         Self {
             user_agent: generate_user_agent(),
             allow_service_workers: false,
-            minimize_to_tray: true,
             close_to_tray: true,
             start_minimized: false,
             auto_start: false,
@@ -89,13 +86,8 @@ impl Settings {
         self.save();
     }
 
-    /// Установка сворачивания в трей.
-    pub fn set_minimize_to_tray(&mut self, val: bool) {
-        self.minimize_to_tray = val;
-        self.save();
-    }
-
     /// Установка закрытия в трей.
+    #[allow(dead_code)]
     pub fn set_close_to_tray(&mut self, val: bool) {
         self.close_to_tray = val;
         self.save();

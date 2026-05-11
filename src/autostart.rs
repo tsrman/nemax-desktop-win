@@ -28,6 +28,7 @@ mod imp {
     }
 
     /// Проверяет, включён ли автозапуск.
+    #[allow(dead_code)]
     pub fn is_auto_start_enabled() -> bool {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         if let Ok(key) = hkcu.open_subkey(REG_PATH) {
@@ -46,6 +47,7 @@ mod imp {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn is_auto_start_enabled() -> bool {
         false
     }

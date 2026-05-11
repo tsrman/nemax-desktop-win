@@ -41,11 +41,10 @@ const DIR_DATA:    &str = "data";
 const DIR_STORAGE: &str = "storage";
 
 const FILE_ICON:      &str = "assets/icon.png";
-const FILE_BLOCKLIST: &str = "data/blocklist.txt";
+const FILE_ALLOWLIST: &str = "data/allowlist.txt";
 
-const DEFAULT_BLOCKLIST: &[&str] = &[
-    "analytics", "apptracer", "perf/", "sdk-api", "adsystem",
-    "crashtoken", "crash", "track",
+const DEFAULT_ALLOWLIST: &[&str] = &[
+    "max.ru",
 ];
 
 const FILTER_SCRIPT_TEMPLATE: &str = include_str!("filter.js");
@@ -60,7 +59,6 @@ enum SettingsCmd {
     NewUA,
     SetSW(bool),
     SetTray {
-        minimize_to_tray: bool,
         close_to_tray: bool,
         start_minimized: bool,
         auto_start: bool,
@@ -83,13 +81,11 @@ impl SettingsCmd {
                 let json = s.trim_start_matches("settings:set_tray:");
                 #[derive(Deserialize)]
                 struct TrayPayload {
-                    minimize_to_tray: bool,
                     close_to_tray: bool,
                     start_minimized: bool,
                     auto_start: bool,
                 }
                 serde_json::from_str::<TrayPayload>(json).ok().map(|v| Self::SetTray {
-                    minimize_to_tray: v.minimize_to_tray,
                     close_to_tray: v.close_to_tray,
                     start_minimized: v.start_minimized,
                     auto_start: v.auto_start,
@@ -141,7 +137,7 @@ fn load_icon(path: impl AsRef<Path>) -> Option<Icon> {
     }
 }
 
-fn load_blocklist(path: impl AsRef<Path>) -> Vec<String> {
+fn load_allowlist(path: impl AsRef<Path>) -> Vec<String> {
     let path = path.as_ref();
     if let Ok(file) = File::open(path) {
         let list: Vec<String> = BufReader::new(file)
@@ -151,14 +147,14 @@ fn load_blocklist(path: impl AsRef<Path>) -> Vec<String> {
             .filter(|s| !s.is_empty() && !s.starts_with('#'))
             .collect();
         if !list.is_empty() {
-            info!("Loaded {} blocklist entries", list.len());
+            info!("Loaded {} allowlist entries", list.len());
             return list;
         }
-        warn!("Blocklist is empty, using defaults");
+        warn!("Allowlist is empty, using defaults");
     } else {
-        info!("Blocklist not found, using defaults");
+        info!("Allowlist not found, using defaults");
     }
-    DEFAULT_BLOCKLIST.iter().map(|s| s.to_string()).collect()
+    DEFAULT_ALLOWLIST.iter().map(|s| s.to_string()).collect()
 }
 
 use base64::{Engine as _, engine::general_purpose};
@@ -216,12 +212,11 @@ fn main() {
     // ── Настройки ───────────────────────────────────────────────────────
     let settings = Arc::new(Mutex::new(Settings::load()));
 
-    let (user_agent, allow_sw, _minimize_to_tray, _close_to_tray, start_minimized) = {
+    let (user_agent, allow_sw, _close_to_tray, start_minimized) = {
         let s = settings.lock().unwrap();
         (
             s.user_agent.clone(),
             s.allow_service_workers,
-            s.minimize_to_tray,
             s.close_to_tray,
             s.start_minimized,
         )
@@ -297,12 +292,22 @@ fn main() {
     info!("Tray icon created");
 
     // ── WebView ─────────────────────────────────────────────────────────
-    let blocklist     = load_blocklist(exe_dir().join(FILE_BLOCKLIST));
-    let filter_script = build_filter_script(&blocklist, allow_sw);
+    let allowlist     = load_allowlist(exe_dir().join(FILE_ALLOWLIST));
+    let filter_script = build_filter_script(&allowlist, allow_sw);
 
     let main_proxy = proxy.clone();
+    let nav_allowlist = allowlist.clone();
+    #[allow(unused_mut)]
     let mut main_wv_builder = WebViewBuilder::new()
         .with_url(APP_ENDPOINT)
+        .with_navigation_handler(move |url| {
+            let low = url.to_lowercase();
+            let allowed = nav_allowlist.iter().any(|pattern| low.contains(pattern.as_str()));
+            if !allowed {
+                warn!("[NAV_BLOCKED] {}", url);
+            }
+            allowed
+        })
         .with_user_agent(&user_agent)
         .with_initialization_script(&filter_script)
         .with_ipc_handler(move |request: wry::http::Request<String>| {
@@ -480,9 +485,8 @@ fn main() {
                         Some(SettingsCmd::SetSW(val)) => {
                             settings.lock().unwrap().set_service_workers(val);
                         }
-                        Some(SettingsCmd::SetTray { minimize_to_tray, close_to_tray, start_minimized, auto_start }) => {
+                        Some(SettingsCmd::SetTray { close_to_tray, start_minimized, auto_start }) => {
                             let mut s = settings.lock().unwrap();
-                            s.minimize_to_tray = minimize_to_tray;
                             s.close_to_tray = close_to_tray;
                             s.start_minimized = start_minimized;
                             s.set_auto_start(auto_start);

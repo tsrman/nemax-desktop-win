@@ -1,5 +1,5 @@
 (function () {
-    const signatures = __SIGNATURES__;
+    const allowedPatterns = __SIGNATURES__;
     const allowSW = __ALLOW_SW__;
 
     /**
@@ -19,6 +19,17 @@
         'msg': "__NOTIF_B64__",
         'call_incoming': "__RING_B64__",
         'call_reconnect': "__RECON_B64__",
+    };
+
+    /**
+     * Проверка: разрешён ли URL?
+     * URL пропускается, если содержит хотя бы один шаблон из allowedPatterns.
+     */
+    const isAllowed = (url) => {
+        if (!url || typeof url !== 'string') return false;
+        const low = url.toLowerCase();
+        if (!low.includes('://') || low.startsWith(location.origin.toLowerCase())) return true;
+        return allowedPatterns.some(pattern => low.includes(pattern));
     };
 
     /**
@@ -96,30 +107,37 @@
     };
     window.Audio.prototype = OriginalAudio.prototype;
 
+    // fetch: разрешены только URL из allowlist
     const _fetch = window.fetch;
     window.fetch = function (input, init) {
         const url = (typeof input === 'string' ? input : (input && input.url) || '');
-        const blob = getReplacementBlob(url);
+        const urlStr = (typeof url === 'string') ? url : String(url);
+        const blob = getReplacementBlob(urlStr);
         if (blob) {
-            log('replacing_audio:fetch:' + url);
+            log('replacing_audio:fetch:' + urlStr);
             return Promise.resolve(new Response(blob, {
                 status: 200, statusText: 'OK',
                 headers: { 'Content-Type': 'audio/mpeg' }
             }));
         }
-        if (signatures.some(sig => url.toLowerCase().includes(sig))) {
+        if (!isAllowed(urlStr)) {
+            log('blocked:fetch:' + urlStr);
             return Promise.reject(new Error('Blocked'));
         }
         return _fetch.apply(this, arguments);
     };
 
+    // XHR: разрешены только URL из allowlist
     const _xhrOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (method, url) {
-        const blob = getReplacementBlob(url);
+        // url может быть объектом URL, приводим к строке
+        const urlStr = (typeof url === 'string') ? url : String(url);
+        const blob = getReplacementBlob(urlStr);
         this._replacement = blob ? URL.createObjectURL(blob) : null;
-        this._url = this._replacement || url;
-        const lowUrl = (typeof url === 'string' ? url : '').toLowerCase();
-        this._blocked = signatures.some(sig => lowUrl.includes(sig));
+        const blocked = !isAllowed(urlStr);
+        this._url = this._replacement || urlStr;
+        this._blocked = blocked;
+        if (blocked) log('blocked:xhr_open:' + urlStr);
         return _xhrOpen.call(this, method, this._url);
     };
 
@@ -129,6 +147,46 @@
         if (this._replacement) log('replacing_audio:xhr:' + this._url);
         return _xhrSend.apply(this, arguments);
     };
+
+    // --- Content Security Policy ---
+    // Блокируем все ресурсы с неразрешённых доменов на уровне браузера
+    const buildCSP = () => {
+        // Собираем уникальные базовые домены из allowlist
+        const baseDomains = new Set();
+        allowedPatterns.forEach(p => {
+            const parts = p.split('.');
+            if (parts.length >= 2) {
+                // Берём последние 2 или 3 части как базовый домен
+                const base = parts.slice(-2).join('.'); // max.ru, okcdn.ru, oneme.ru
+                baseDomains.add(base);
+            }
+        });
+        const origins = Array.from(baseDomains)
+            .map(d => 'https://*.' + d + ' https://' + d + ' wss://*.' + d)
+            .join(' ');
+        return (
+               "script-src 'unsafe-inline' 'unsafe-eval' blob: " + origins + "; " +
+               "worker-src blob: " + origins + "; " +
+               "connect-src " + origins + " blob:; " +
+               "img-src " + origins + " data: blob:; " +
+               "style-src 'unsafe-inline' " + origins + "; " +
+               "font-src " + origins + " data:; " +
+               "media-src " + origins + " blob:; " +
+               "frame-src " + origins + "; " +
+               "child-src blob: " + origins + "; " +
+               "form-action https://*;");
+    };
+    const cspMeta = document.createElement('meta');
+    cspMeta.httpEquiv = 'Content-Security-Policy';
+    cspMeta.content = buildCSP();
+    const injectCSP = () => {
+        if (document.head) {
+            document.head.insertBefore(cspMeta, document.head.firstChild);
+        } else {
+            setTimeout(injectCSP, 5);
+        }
+    };
+    injectCSP();
 
     // --- Визуальные исправления (Анимация) ---
     const visualFix = document.createElement('style');
@@ -164,7 +222,7 @@
     }
     const _beacon = navigator.sendBeacon;
     navigator.sendBeacon = function (url) {
-        if (signatures.some(sig => url.toLowerCase().includes(sig))) return false;
+        if (!isAllowed(url)) return false;
         return _beacon.apply(this, arguments);
     };
 
@@ -178,5 +236,5 @@
         window.addEventListener('DOMContentLoaded', () => setTimeout(sendReady, 100));
     }
 
-    log('filter_initialized_v2');
+    log('filter_initialized_allowlist');
 })();

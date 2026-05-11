@@ -1,17 +1,72 @@
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
-        let mut res = winres::WindowsResource::new();
-        res.set_icon("assets/icon.ico");
-        res.compile().unwrap();
-
-        // Копируем WebView2Loader.dll из артефактов webview2-com-sys
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let out_dir = std::env::var("OUT_DIR").unwrap();
-        let target_dir = std::path::Path::new(&out_dir)
-            .parent().unwrap()  // build/
-            .parent().unwrap()  // release|debug/
-            .parent().unwrap(); // target/<triple>/
 
-        // Ищем DLL в сборочных артефактах webview2-com-sys
+        // ── Иконка и версия через windres напрямую ──
+        let icon_path = std::path::Path::new(&manifest_dir)
+            .join("assets")
+            .join("icon.ico");
+
+        let rc_path = std::path::Path::new(&out_dir).join("resource.rc");
+        let res_path = std::path::Path::new(&out_dir).join("resource.o");
+
+        let version = env!("CARGO_PKG_VERSION");
+        let rc_content = format!(
+            "#pragma code_page(65001)\n\
+             1 VERSIONINFO\n\
+             FILEOS 0x40004\n\
+             FILESUBTYPE 0x0\n\
+             FILEFLAGSMASK 0x3f\n\
+             FILEFLAGS 0x0\n\
+             PRODUCTVERSION {v_comma}\n\
+             FILETYPE 0x1\n\
+             FILEVERSION {v_comma}\n\
+             {{\n\
+             BLOCK \"StringFileInfo\"\n\
+             {{\n\
+             BLOCK \"000004b0\"\n\
+             {{\n\
+             VALUE \"ProductName\", \"neMAX\"\n\
+             VALUE \"ProductVersion\", \"{v}\"\n\
+             VALUE \"FileDescription\", \"neMAX\"\n\
+             VALUE \"FileVersion\", \"{v}\"\n\
+             }}\n\
+             }}\n\
+             BLOCK \"VarFileInfo\" {{\n\
+             VALUE \"Translation\", 0x0, 0x04b0\n\
+             }}\n\
+             }}\n\
+             1 ICON \"{icon}\"",
+            v = version,
+            v_comma = version.replace('.', ","),
+            icon = icon_path.display().to_string().replace('\\', "/"),
+        );
+
+        std::fs::write(&rc_path, &rc_content).unwrap();
+
+        // Компилируем .rc → .o через windres
+        let windres = std::env::var("WINDRES").unwrap_or_else(|_| "windres".into());
+        let status = std::process::Command::new(&windres)
+            .arg(rc_path)
+            .arg(&res_path)
+            .status()
+            .expect("Failed to run windres");
+
+        if !status.success() {
+            panic!("windres failed");
+        }
+
+        // Линкуем .o напрямую (для GNU тулчейна)
+        // В отличие от winres, передаём object file, а не static library
+        println!("cargo:rustc-link-arg={}", res_path.display());
+
+        // ── WebView2Loader.dll ──
+        let target_dir = std::path::Path::new(&out_dir)
+            .parent().unwrap()
+            .parent().unwrap()
+            .parent().unwrap();
+
         let dll_src = target_dir
             .join("build")
             .read_dir()
@@ -30,9 +85,7 @@ fn main() {
 
         if let Some(ref src) = dll_src {
             let dll_dest = target_dir.join("release").join("WebView2Loader.dll");
-            let dll_dest_debug = target_dir.join("debug").join("WebView2Loader.dll");
             let _ = std::fs::copy(src, &dll_dest);
-            let _ = std::fs::copy(src, &dll_dest_debug);
         }
     }
 }

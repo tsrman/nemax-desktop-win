@@ -274,19 +274,6 @@
 
   <div class="row">
     <div class="row-info">
-      <div class="row-label">Сворачивать в трей</div>
-      <div class="row-desc">
-        При сворачивании окна прятать его в системный трей вместо панели задач.
-      </div>
-    </div>
-    <label class="toggle">
-      <input type="checkbox" id="tray-minimize" onchange="onTrayChange()">
-      <span class="toggle-track"></span>
-    </label>
-  </div>
-
-  <div class="row">
-    <div class="row-info">
       <div class="row-label">Закрывать в трей</div>
       <div class="row-desc">
         При нажатии на «×» окно скрывается в трей. Полный выход — через меню трея.
@@ -356,7 +343,6 @@
     currentUA = s.user_agent || '';
     document.getElementById('ua-display').textContent = currentUA || '—';
     document.getElementById('sw-toggle').checked = !!s.allow_service_workers;
-    document.getElementById('tray-minimize').checked = s.minimize_to_tray !== false;
     document.getElementById('tray-close').checked = s.close_to_tray !== false;
     document.getElementById('tray-start-min').checked = !!s.start_minimized;
     document.getElementById('tray-autostart').checked = !!s.auto_start;
@@ -385,7 +371,6 @@
 
   function onTrayChange() {
     send('settings:set_tray:' + JSON.stringify({
-      minimize_to_tray: document.getElementById('tray-minimize').checked,
       close_to_tray: document.getElementById('tray-close').checked,
       start_minimized: document.getElementById('tray-start-min').checked,
       auto_start: document.getElementById('tray-autostart').checked,

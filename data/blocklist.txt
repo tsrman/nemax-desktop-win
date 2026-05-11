@@ -1,8 +1,0 @@
-analytics
-apptracer
-perf/
-sdk-api
-adsystem
-crashtoken
-crash
-track
