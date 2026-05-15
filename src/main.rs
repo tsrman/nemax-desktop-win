@@ -233,9 +233,19 @@ fn main() {
     let proxy = event_loop.create_proxy();
 
     // ── Проверка единственного экземпляра ────────────────────────────────
+    #[cfg(target_os = "linux")]
+    if !single_instance::ensure_single_instance(proxy.clone()) {
+        info!("Another instance is already running, exiting");
+        return;
+    }
+    #[cfg(target_os = "windows")]
     if !single_instance::ensure_single_instance() {
         info!("Another instance is already running, exiting");
         return;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        // no-op for other platforms
     }
 
     let menu_bar = Menu::new();
