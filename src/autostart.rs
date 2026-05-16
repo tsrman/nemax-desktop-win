@@ -1,5 +1,7 @@
-/// Модуль управления автозапуском через реестр Windows.
-/// На других платформах — no-op заглушки.
+/// Модуль управления автозапуском.
+/// - Windows: через реестр
+/// - Linux: через .desktop файл в ~/.config/autostart/
+/// - macOS: no-op заглушка
 
 #[cfg(target_os = "windows")]
 mod imp {
@@ -39,7 +41,89 @@ mod imp {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+mod imp {
+    use std::error::Error;
+    use std::fs;
+    use std::path::PathBuf;
+
+    const DESKTOP_FILE_NAME: &str = "nemax.desktop";
+
+    fn get_autostart_dir() -> Option<PathBuf> {
+        std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".config"))
+            })
+            .map(|p| p.join("autostart"))
+    }
+
+    fn get_desktop_file_path() -> Option<PathBuf> {
+        get_autostart_dir().map(|dir| dir.join(DESKTOP_FILE_NAME))
+    }
+
+    fn generate_desktop_file(exe_path: &str) -> String {
+        format!(
+            r#"[Desktop Entry]
+Type=Application
+Name=neMAX
+Comment=Lightweight max.ru client
+Exec="{}" --minimized
+Icon=nemax
+Terminal=false
+Categories=Network;
+StartupNotify=false
+"#,
+            exe_path
+        )
+    }
+
+    /// Включает или выключает автозапуск приложения.
+    pub fn set_auto_start(enabled: bool) -> Result<(), Box<dyn Error>> {
+        if let Some(desktop_path) = get_desktop_file_path() {
+            if enabled {
+                let exe_path = std::env::current_exe()?
+                    .to_string_lossy()
+                    .to_string();
+                
+                // Создаём директорию autostart если её нет
+                if let Some(parent) = desktop_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+
+                let content = generate_desktop_file(&exe_path);
+                fs::write(&desktop_path, content)?;
+                
+                // Делаем файл исполняемым (опционально, но хорошая практика)
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = fs::metadata(&desktop_path)?.permissions();
+                    perms.set_mode(perms.mode() | 0o755);
+                    fs::set_permissions(&desktop_path, perms)?;
+                }
+            } else {
+                // Игнорируем ошибку если файла нет
+                let _ = fs::remove_file(&desktop_path);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Проверяет, включён ли автозапуск.
+    #[allow(dead_code)]
+    pub fn is_auto_start_enabled() -> bool {
+        if let Some(desktop_path) = get_desktop_file_path() {
+            desktop_path.exists()
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 mod imp {
     use std::error::Error;
 
