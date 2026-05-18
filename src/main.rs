@@ -549,10 +549,11 @@ fn main() {
             // ── Кнопка «Закрыть» → трей (или выход) ────────────────
             Event::WindowEvent { event: WindowEvent::CloseRequested, window_id, .. } => {
                 if window_id == main_window_id {
+                    // Сразу скрываем окно (видео может блокировать закрытие)
+                    main_window.set_visible(false);
                     let close_to_tray = settings.lock().unwrap().close_to_tray;
                     if close_to_tray {
                         info!("Close requested — hiding to tray");
-                        main_window.set_visible(false);
                         tray_state.show_hide_item.set_text("Показать");
                     } else {
                         info!("Main window closed, exiting");
